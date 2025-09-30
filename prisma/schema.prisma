@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  tgId      BigInt   @unique
+  username  String?
+  lang      String   @default("ru")
+  tz        String   @default("UTC")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  consents Consent[]
+  messages Message[]
+}
+
+model Consent {
+  id        Int       @id @default(autoincrement())
+  user      User      @relation(fields: [userId], references: [id])
+  userId    Int
+  version   String
+  grantedAt DateTime  @default(now())
+  revokedAt DateTime?
+}
+
+model Message {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  role      String // 'user' or 'assistant'
+  content   String   @db.Text
+  tokens    Int?
+  createdAt DateTime @default(now())
+}

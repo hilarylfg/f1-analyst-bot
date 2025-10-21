@@ -10,7 +10,7 @@ export async function askAI(question: string, apiKey: string): Promise<string> {
     try {
         const response = await axios.post('https://openrouter.ai/api/v1/chat/completions',
             {
-                model: 'x-ai/grok-4-fast:free',
+                model: "deepseek/deepseek-r1-0528-qwen3-8b:free",
                 messages: [
                     {role: 'system', content: systemPrompt},
                     {role: 'user', content: question},

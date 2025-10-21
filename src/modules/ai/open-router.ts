@@ -1,20 +1,41 @@
 import axios from 'axios';
+import { contextBuilder } from '../stats/context-builder.js';
 
-export async function askAI(question: string, apiKey: string): Promise<string> {
+export async function askAI(question: string, apiKey: string, includeContext: boolean = false): Promise<string> {
+    const currentDate = new Date().toISOString().split('T')[0];
+
+    let contextData = '';
+    if (includeContext) {
+        contextData = '\n\n' + contextBuilder.getChampionshipContext() + '\n';
+    }
+
     const systemPrompt = `Вы — ведущий AI-аналитик Формулы 1, обладающий глубокими знаниями в области автоспорта.
 
-Ваша основная задача — предоставлять пользователям исчерпывающие, точные и увлекательные ответы на любые вопросы, касающиеся Формулы 1. Это включает в себя анализ стилей вождения, сравнение пилотов разных эпох, обсуждение технических аспектов болидов и истории гонок.
+Текущая дата: ${currentDate}
 
-Все ответы должны быть на русском языке. Стремитесь к краткости, но при этом сохраняйте содержательность и глубину информации. Учитывайте, что ваши ответы будут отображаться в Telegram, поэтому используйте форматирование, совместимое с этой платформой (заголовки из Markdown не поддерживаются).`;
+${contextData}
+
+**КРИТИЧЕСКИ ВАЖНО:**
+- Если вам предоставлены РЕАЛЬНЫЕ ДАННЫЕ сезона ${new Date().getFullYear()} выше, используйте ТОЛЬКО их
+- НЕ полагайтесь на устаревшие данные из вашей базы знаний для сезона ${new Date().getFullYear()}
+- Если данных недостаточно, честно скажите об этом
+- Всегда указывайте, когда используете реальные данные vs общие знания
+
+Ваша задача — предоставлять исчерпывающие, точные и увлекательные ответы на вопросы о Формуле 1.
+
+Все ответы должны быть на русском языке, краткими (до 3800 символов), но содержательными.
+Используйте Markdown для форматирования, совместимое с Telegram (БЕЗ заголовков уровня #).`;
 
     try {
         const response = await axios.post('https://openrouter.ai/api/v1/chat/completions',
             {
-                model: "deepseek/deepseek-r1-0528-qwen3-8b:free",
+                model: "tngtech/deepseek-r1t2-chimera:free",
                 messages: [
                     {role: 'system', content: systemPrompt},
                     {role: 'user', content: question},
                 ],
+                temperature: 0.3,
+                max_tokens: 2000,
             },
             {
                 headers: {'Authorization': `Bearer ${apiKey}`},

@@ -6,7 +6,7 @@ import {PrismaClient} from '@prisma/client';
 import {AIRacePredictor} from "./modules/analysis/ai-race-predictor.js";
 import { championship } from './modules/stats/championship.js';
 import { driverStats } from './modules/stats/driver-stats.js';
-import { f1Data } from './core/parser.js';
+import {f1Data} from "./modules/openf1/openf1-parser.js";
 
 const prisma = new PrismaClient();
 
@@ -14,6 +14,7 @@ export class F1Bot {
     private bot: TelegramBot;
     private openRouterKey?: string;
     private aiPredictor?: AIRacePredictor;
+    private isDataReady: boolean = false;
 
     constructor(token: string, openRouterKey?: string) {
         this.bot = new TelegramBot(token, {polling: true});
@@ -227,10 +228,46 @@ export class F1Bot {
                 await this.bot.sendMessage(chatId, "Произошла ошибка при создании предикции.");
             }
         });
+
+        this.bot.onText(/\/debug/, async (msg) => {
+            const chatId = msg.chat.id;
+
+            const stats = `
+🔍 **ДЕБАГ ИНФОРМАЦИЯ**
+
+Данные готовы: ${this.isDataReady ? '✅' : '❌'}
+Результатов гонок: ${f1Data.getRaceResults().length}
+Пилотов: ${f1Data.getAllDrivers().length}
+Трасс: ${f1Data.getAllTracks().length}
+${f1Data.getLastUpdateInfo()}
+
+**Примеры результатов:**
+${f1Data.getRaceResults().slice(0, 3).map(r =>
+                `${r.track}: P${r.position} ${r.driver}`
+            ).join('\n')}
+    `.trim();
+
+            await this.bot.sendMessage(chatId, stats, { parse_mode: 'Markdown' });
+        });
     }
 
-    start() {
+    async start() {
+        console.log('🚀 Запуск F1 Analyst Bot...');
+        console.log('⏳ Загрузка данных из OpenF1 API...');
+
+        await f1Data.initialize();
+
+        this.isDataReady = f1Data.isReady();
+
+        if (!this.isDataReady) {
+            console.error('❌ Не удалось загрузить данные! Бот запущен, но команды могут не работать.');
+        } else {
+            console.log('✅ Данные успешно загружены!');
+            console.log(`📊 Результатов: ${f1Data.getRaceResults().length}`);
+            console.log(`📋 Трасс: ${f1Data.getAllTracks().length}`);
+        }
+
         this.setupCommands();
-        console.log("✅ F1 Analyst Bot запущен с поддержкой CSV-данных сезона 2025!");
+        console.log("✅ F1 Analyst Bot запущен с OpenF1 API! Данные обновляются автоматически.");
     }
 }

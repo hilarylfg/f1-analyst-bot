@@ -1,5 +1,5 @@
-import { f1Data } from '../../core/parser.js';
 import { championship } from './championship.js';
+import {f1Data} from "../openf1/openf1-parser.js";
 
 export class DriverStatsAnalyzer {
 
@@ -61,7 +61,7 @@ export class DriverStatsAnalyzer {
 
         let output = `📈 **Форма пилота: ${driver}** (последние ${races} гонок)\n\n`;
 
-        lastRaces.forEach((r, index) => {
+        lastRaces.forEach((r) => {
             const emoji = r.position === '1' ? '🥇' :
                 r.position === '2' ? '🥈' :
                     r.position === '3' ? '🥉' :

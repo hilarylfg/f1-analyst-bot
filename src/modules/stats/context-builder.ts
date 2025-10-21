@@ -1,6 +1,6 @@
 
 import { championship } from './championship.js';
-import {f1Data} from "../../core/parser.js";
+import {f1Data} from "../openf1/openf1-parser.js";
 
 export class ContextBuilder {
     getChampionshipContext(): string {

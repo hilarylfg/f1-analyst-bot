@@ -4,8 +4,6 @@
   "dependencies": {
     "@prisma/client": "^6.17.1",
     "axios": "^1.12.2",
-    "chart.js": "^4.5.0",
-    "chartjs-node-canvas": "^5.0.0",
     "csv-parse": "^6.1.0",
     "dotenv": "^17.2.2",
     "node-telegram-bot-api": "^0.66.0"
@@ -14,6 +12,7 @@
     "@types/bun": "latest",
     "@types/node": "^24.5.2",
     "@types/node-telegram-bot-api": "^0.64.11",
+    "@vercel/node": "^5.4.1",
     "prisma": "^6.16.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.2"
@@ -21,8 +20,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "vercel-build": "tsc && node dist/index.js"
+    "dev": "tsc && node dist/index.js",
+    "vercel-build": "prisma generate && bun run build"
   },
   "type": "module"
 }

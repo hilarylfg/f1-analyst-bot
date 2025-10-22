@@ -28,10 +28,12 @@ export class ChampionshipCalculator {
 
         results.forEach(result => {
             if (!driverMap.has(result.driver)) {
+                const currentTeam = f1Data.getCurrentTeam(result.no) || result.team;
+
                 driverMap.set(result.driver, {
                     position: 0,
                     driver: result.driver,
-                    team: result.team,
+                    team: currentTeam,
                     points: 0,
                     wins: 0,
                     podiums: 0,
@@ -42,12 +44,25 @@ export class ChampionshipCalculator {
             }
 
             const standing = driverMap.get(result.driver)!;
+
+            // Очки всегда
             standing.points += result.points;
 
-            if (result.position === '1') standing.wins++;
-            if (['1', '2', '3'].includes(result.position)) standing.podiums++;
+            // Победы только в гонках
+            if (result.position === '1' && !result.isSprint && result.isClassified) {
+                standing.wins++;
+            }
+
+            // Подиумы только в гонках
+            if (['1', '2', '3'].includes(result.position) && !result.isSprint && result.isClassified) {
+                standing.podiums++;
+            }
+
             if (result.setFastestLap) standing.fastestLaps++;
-            if (result.position === 'NC' || result.position === 'DQ') standing.dnfs++;
+
+            if (!result.isClassified || result.position === 'NC') {
+                standing.dnfs++;
+            }
         });
 
         // Добавляем поул-позиции из квалификации
@@ -58,11 +73,9 @@ export class ChampionshipCalculator {
             }
         });
 
-        // Сортируем по очкам
         const standings = Array.from(driverMap.values())
             .sort((a, b) => b.points - a.points);
 
-        // Назначаем позиции
         standings.forEach((standing, index) => {
             standing.position = index + 1;
         });
@@ -70,25 +83,40 @@ export class ChampionshipCalculator {
         return standings;
     }
 
+    /**
+     * ✅ ИСПРАВЛЕНО: Считаем очки команд НАПРЯМУЮ из результатов,
+     * а НЕ через суммирование очков пилотов (чтобы учесть переходы)
+     */
     getTeamStandings(): TeamStanding[] {
-        const driverStandings = this.getDriverStandings();
+        const results = f1Data.getRaceResults();
         const teamMap = new Map<string, TeamStanding>();
 
-        driverStandings.forEach(driver => {
-            if (!teamMap.has(driver.team)) {
-                teamMap.set(driver.team, {
+        // ✅ Считаем очки НАПРЯМУЮ из результатов (команда на момент гонки!)
+        results.forEach(result => {
+            if (!teamMap.has(result.team)) {
+                teamMap.set(result.team, {
                     position: 0,
-                    team: driver.team,
+                    team: result.team,
                     points: 0,
                     wins: 0,
                     podiums: 0,
                 });
             }
 
-            const team = teamMap.get(driver.team)!;
-            team.points += driver.points;
-            team.wins += driver.wins;
-            team.podiums += driver.podiums;
+            const team = teamMap.get(result.team)!;
+
+            // ✅ Очки - из результата (команда на момент гонки)
+            team.points += result.points;
+
+            // ✅ Победы - только гонки (не спринты)
+            if (result.position === '1' && !result.isSprint && result.isClassified) {
+                team.wins++;
+            }
+
+            // ✅ Подиумы - только гонки (не спринты)
+            if (['1', '2', '3'].includes(result.position) && !result.isSprint && result.isClassified) {
+                team.podiums++;
+            }
         });
 
         const standings = Array.from(teamMap.values())
@@ -101,12 +129,12 @@ export class ChampionshipCalculator {
         return standings;
     }
 
-    formatDriverStandings(limit: number = 10): string {
-        const standings = this.getDriverStandings().slice(0, limit);
+    formatDriverStandings(): string {
+        const standings = this.getDriverStandings().slice(0);
 
-        let output = '🏆 **ЧЕМПИОНАТ ПИЛОТОВ 2025** (после ' + f1Data.getAllTracks().length + ' гонок)\n\n';
+        let output = '🏆 **ЧЕМПИОНАТ ПИЛОТОВ 2025**\n\n';
         output += '```\n';
-        output += 'Поз  Пилот                    Очки  П  Подиум  FL\n';
+        output += 'Поз  Пилот                    Очки  П  Подиум\n';
         output += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
 
         standings.forEach(s => {
@@ -115,13 +143,11 @@ export class ChampionshipCalculator {
             const points = s.points.toString().padStart(4);
             const wins = s.wins.toString().padStart(2);
             const podiums = s.podiums.toString().padStart(6);
-            const fl = s.fastestLaps.toString().padStart(3);
-
-            output += `${pos} ${name} ${points}  ${wins}  ${podiums}  ${fl}\n`;
+            output += `${pos} ${name} ${points}  ${wins}  ${podiums}\n`;
         });
 
         output += '```\n';
-        output += '\n*П - Победы, FL - Быстрейшие круги*';
+        output += '\n*П - Победы в гонках (спринты не считаются)*';
 
         return output;
     }

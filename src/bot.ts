@@ -39,6 +39,23 @@ export class F1Bot {
         }
     }
 
+    private splitMessage(text: string, maxLength: number): string[] {
+        const parts: string[] = [];
+        let current = '';
+
+        text.split('\n').forEach(line => {
+            if ((current + line + '\n').length > maxLength) {
+                parts.push(current);
+                current = line + '\n';
+            } else {
+                current += line + '\n';
+            }
+        });
+
+        if (current) parts.push(current);
+        return parts;
+    }
+
     private setupCommands() {
         this.bot.on('message', this.onAnyMessage.bind(this));
 
@@ -75,7 +92,7 @@ export class F1Bot {
         this.bot.onText(/\/standings/, async (msg) => {
             const chatId = msg.chat.id;
             try {
-                const standings = championship.formatDriverStandings(15);
+                const standings = championship.formatDriverStandings();
                 await this.bot.sendMessage(chatId, standings, { parse_mode: 'Markdown' });
             } catch (error) {
                 console.error('Ошибка /standings:', error);
@@ -149,23 +166,168 @@ export class F1Bot {
 
         this.bot.onText(/\/help/, (msg) => {
             const helpText = `*🏎️ F1 Analyst Bot - Доступные команды:*\n\n` +
-                `*📊 СТАТИСТИКА (на основе реальных данных сезона 2025):*\n` +
+                `*📊 СТАТИСТИКА (актуальные данные через OpenF1 API):*\n` +
                 `/standings - Таблица чемпионата пилотов\n` +
                 `/constructors - Таблица конструкторов\n` +
                 `/driver [имя] - Полный профиль пилота\n` +
                 `/form [имя] - Форма пилота (последние 5 гонок)\n` +
-                `/drivers - Список всех пилотов\n\n` +
+                `/points [имя] - Детальная разбивка очков пилота\n` +
+                `/drivers - Список всех пилотов\n` +
+                `/teams - Список всех команд с очками\n\n` +
                 `*🤖 ИИ-АНАЛИЗ:*\n` +
                 `/compare [пилот1] [пилот2] - Сравнение двух пилотов\n` +
                 `/ask [вопрос] - Задать вопрос о Формуле 1\n` +
-                `/predict [трасса] - Предикция результатов гонки\n\n` +
+                `/predict [трасса] - Предикт результатов гонки\n\n` +
                 `*💡 Примеры:*\n` +
                 `\`/driver Piastri\`\n` +
                 `\`/form Norris\`\n` +
+                `\`/points Hamilton\`\n` +
+                `\`/teams\`\n` +
                 `\`/compare Verstappen Norris\`\n` +
-                `\`/ask Почему McLaren так быстр в этом сезоне?\``;
+                `\`/ask Почему McLaren так быстр в этом сезоне?\`\n\n` +
+                `*🔧 Дебаг:*\n` +
+                `/check\\_driver [имя] - Детальная проверка пилота\n` +
+                `/check\\_team [команда] - Детальная проверка команды\n\n` +
+                `_Данные обновляются автоматически каждые 30 минут_`;
 
             this.bot.sendMessage(msg.chat.id, helpText, {parse_mode: 'Markdown'});
+        });
+
+        // Список всех команд с очками
+        this.bot.onText(/\/teams/, async (msg) => {
+            const chatId = msg.chat.id;
+
+            if (!this.isDataReady) {
+                return this.bot.sendMessage(chatId, '⏳ Данные ещё загружаются...');
+            }
+
+            try {
+                const allResults = f1Data.getRaceResults();
+
+                const teamPoints = new Map<string, {
+                    total: number,
+                    race: number,
+                    sprint: number,
+                    drivers: Set<string>
+                }>();
+
+                allResults.forEach(r => {
+                    if (!teamPoints.has(r.team)) {
+                        teamPoints.set(r.team, {
+                            total: 0,
+                            race: 0,
+                            sprint: 0,
+                            drivers: new Set()
+                        });
+                    }
+
+                    const team = teamPoints.get(r.team)!;
+                    team.total += r.points;
+                    if (r.isSprint) {
+                        team.sprint += r.points;
+                    } else {
+                        team.race += r.points;
+                    }
+                    team.drivers.add(r.driver);
+                });
+
+                const sortedTeams = Array.from(teamPoints.entries())
+                    .sort((a, b) => b[1].total - a[1].total);
+
+                let output = '🏁 **ВСЕ КОМАНДЫ СЕЗОНА 2025**\n\n';
+
+                sortedTeams.forEach(([teamName, data], index) => {
+                    const drivers = Array.from(data.drivers).join(', ');
+                    output += `**${index + 1}. ${teamName}** — ${data.total} очков\n`;
+                    output += `   👥 Пилоты: ${drivers}\n\n`;
+                });
+
+                await this.bot.sendMessage(chatId, output, { parse_mode: 'Markdown' });
+            } catch (error) {
+                console.error('Ошибка /teams:', error);
+                await this.bot.sendMessage(chatId, '❌ Ошибка при получении списка команд.');
+            }
+        });
+
+        // Проверка команды (дебаг)
+        this.bot.onText(/\/check_team (.+)/, async (msg, match) => {
+            const chatId = msg.chat.id;
+
+            if (!this.isDataReady) {
+                return this.bot.sendMessage(chatId, '⏳ Данные ещё загружаются...');
+            }
+
+            const teamName = match?.[1];
+            if (!teamName) {
+                return this.bot.sendMessage(chatId, 'Использование: /check_team [название команды]');
+            }
+
+            try {
+                const allResults = f1Data.getRaceResults();
+
+                // Ищем результаты команды
+                const teamResults = allResults.filter(r =>
+                    r.team.toLowerCase().includes(teamName.toLowerCase())
+                );
+
+                if (teamResults.length === 0) {
+                    return this.bot.sendMessage(chatId, `❌ Команда "${teamName}" не найдена.`);
+                }
+
+                const fullTeamName = teamResults[0].team;
+
+                // Подсчёт очков
+                const totalPoints = teamResults.reduce((sum, r) => sum + r.points, 0);
+                const racePoints = teamResults.filter(r => !r.isSprint).reduce((sum, r) => sum + r.points, 0);
+                const sprintPoints = teamResults.filter(r => r.isSprint).reduce((sum, r) => sum + r.points, 0);
+
+                // Пилоты команды
+                const driversSet = new Set(teamResults.map(r => r.driver));
+                const drivers = Array.from(driversSet);
+
+                // Очки по пилотам
+                const driverPoints = new Map<string, number>();
+                teamResults.forEach(r => {
+                    const current = driverPoints.get(r.driver) || 0;
+                    driverPoints.set(r.driver, current + r.points);
+                });
+
+                let output = `🏎️ **${fullTeamName}**\n\n`;
+                output += `📊 **ИТОГО ОЧКОВ: ${totalPoints}**\n`;
+                output += `   🏁 Из гонок: ${racePoints}\n`;
+                output += `   🏃 Из спринтов: ${sprintPoints}\n\n`;
+
+                output += `👥 **ПИЛОТЫ:**\n`;
+                drivers.forEach(driver => {
+                    const points = driverPoints.get(driver) || 0;
+                    output += `   • ${driver}: ${points} очков\n`;
+                });
+
+                output += `\n📋 **ВСЕ РЕЗУЛЬТАТЫ (в хронологическом порядке):**\n\n`;
+
+                teamResults.forEach((r, index) => {
+                    const type = r.isSprint ? '🏃 Sprint' : '🏁 Race';
+                    const prelim = r.isPreliminary ? ' ⚠️' : '';
+                    const dateStr = new Date(r.date).toISOString().split('T')[0];
+
+                    output += `${index + 1}. **${dateStr}** ${type} - ${r.track}\n`;
+                    output += `   ${r.driver}: P${r.position} → +${r.points} очков${prelim}\n\n`;
+                });
+
+                output += `_Всего результатов: ${teamResults.length}_`;
+
+                if (output.length > 4000) {
+                    const parts = this.splitMessage(output, 4000);
+                    for (const part of parts) {
+                        await this.bot.sendMessage(chatId, part, { parse_mode: 'Markdown' });
+                    }
+                } else {
+                    await this.bot.sendMessage(chatId, output, { parse_mode: 'Markdown' });
+                }
+            } catch (error) {
+                console.error('Ошибка /check_team:', error);
+                await this.bot.sendMessage(chatId, '❌ Ошибка при проверке команды.');
+            }
         });
 
         this.bot.onText(/\/compare (.+) (.+)/, async (msg, match) => {
@@ -229,25 +391,231 @@ export class F1Bot {
             }
         });
 
-        this.bot.onText(/\/debug/, async (msg) => {
+        // Детальная информация об очках пилота
+        this.bot.onText(/\/points (.+)/, async (msg, match) => {
             const chatId = msg.chat.id;
 
-            const stats = `
-🔍 **ДЕБАГ ИНФОРМАЦИЯ**
+            if (!this.isDataReady) {
+                return this.bot.sendMessage(chatId, '⏳ Данные ещё загружаются, подождите немного...');
+            }
 
-Данные готовы: ${this.isDataReady ? '✅' : '❌'}
-Результатов гонок: ${f1Data.getRaceResults().length}
-Пилотов: ${f1Data.getAllDrivers().length}
-Трасс: ${f1Data.getAllTracks().length}
-${f1Data.getLastUpdateInfo()}
+            const driverName = match?.[1];
 
-**Примеры результатов:**
-${f1Data.getRaceResults().slice(0, 3).map(r =>
-                `${r.track}: P${r.position} ${r.driver}`
-            ).join('\n')}
-    `.trim();
+            if (!driverName) {
+                return this.bot.sendMessage(chatId, 'Использование: /points [имя пилота]');
+            }
 
-            await this.bot.sendMessage(chatId, stats, { parse_mode: 'Markdown' });
+            try {
+                const results = f1Data.getDriverResults(driverName);
+
+                if (results.length === 0) {
+                    return this.bot.sendMessage(chatId, `❌ Пилот "${driverName}" не найден в базе данных.`);
+                }
+
+                const driver = results[0].driver;
+                const team = results[0].team;
+
+                // Разделяем на гонки и спринты
+                const raceResults = results.filter(r => !r.isSprint);
+                const sprintResults = results.filter(r => r.isSprint);
+
+                // Подсчёт статистики
+                const totalPoints = results.reduce((sum, r) => sum + r.points, 0);
+                const racePoints = raceResults.reduce((sum, r) => sum + r.points, 0);
+                const sprintPoints = sprintResults.reduce((sum, r) => sum + r.points, 0);
+
+                const wins = raceResults.filter(r => r.position === '1').length;
+                const podiums = raceResults.filter(r => ['1', '2', '3'].includes(r.position)).length;
+
+                const sprintWins = sprintResults.filter(r => r.position === '1').length;
+                const sprintPodiums = sprintResults.filter(r => ['1', '2', '3'].includes(r.position)).length;
+
+                let output = `🏎️ **${driver}** (${team})\n\n`;
+                output += `📊 **ИТОГО ОЧКОВ: ${totalPoints}**\n`;
+                output += `   🏁 Из гонок: ${racePoints} (${raceResults.length} гонок)\n`;
+                output += `   🏃 Из спринтов: ${sprintPoints} (${sprintResults.length} спринтов)\n\n`;
+
+                output += `🏆 **СТАТИСТИКА ГОНОК:**\n`;
+                output += `   Победы: ${wins}\n`;
+                output += `   Подиумы: ${podiums}\n\n`;
+
+                if (sprintResults.length > 0) {
+                    output += `🏃 **СТАТИСТИКА СПРИНТОВ (не считаются в победах):**\n`;
+                    output += `   Победы в спринтах: ${sprintWins}\n`;
+                    output += `   Подиумы в спринтах: ${sprintPodiums}\n\n`;
+                }
+
+                output += `📋 **ДЕТАЛЬНАЯ РАЗБИВКА ПО ГОНКАМ:**\n\n`;
+
+                // Группируем результаты по трассам (могут быть гонка + спринт на одной трассе)
+                const trackMap = new Map<string, { race?: typeof results[0], sprint?: typeof results[0] }>();
+
+                results.forEach(r => {
+                    if (!trackMap.has(r.track)) {
+                        trackMap.set(r.track, {});
+                    }
+                    const track = trackMap.get(r.track)!;
+                    if (r.isSprint) {
+                        track.sprint = r;
+                    } else {
+                        track.race = r;
+                    }
+                });
+
+                trackMap.forEach((data, track) => {
+                    output += `**${track}:**\n`;
+
+                    if (data.race) {
+                        const emoji = data.race.position === '1' ? '🥇' :
+                            data.race.position === '2' ? '🥈' :
+                                data.race.position === '3' ? '🥉' : '🏁';
+                        const preliminary = data.race.isPreliminary ? ' ⚠️ _предварительно_' : '';
+                        output += `   ${emoji} Гонка: P${data.race.position} → **+${data.race.points} очков**${preliminary}\n`;
+                    }
+
+                    if (data.sprint) {
+                        const emoji = data.sprint.position === '1' ? '🥇' :
+                            data.sprint.position === '2' ? '🥈' :
+                                data.sprint.position === '3' ? '🥉' : '🏃';
+                        const preliminary = data.sprint.isPreliminary ? ' ⚠️ _предварительно_' : '';
+                        output += `   ${emoji} Спринт: P${data.sprint.position} → **+${data.sprint.points} очков**${preliminary}\n`;
+                    }
+
+                    output += '\n';
+                });
+
+                output += `_Всего этапов: ${trackMap.size}_`;
+
+                await this.bot.sendMessage(chatId, output, { parse_mode: 'Markdown' });
+            } catch (error) {
+                console.error('Ошибка /points:', error);
+                await this.bot.sendMessage(chatId, '❌ Ошибка при получении информации об очках.');
+            }
+        });
+
+        this.bot.onText(/\/check_duplicates/, async (msg) => {
+            const chatId = msg.chat.id;
+
+            if (!this.isDataReady) {
+                return this.bot.sendMessage(chatId, '⏳ Данные ещё загружаются...');
+            }
+
+            try {
+                const allResults = f1Data.getRaceResults();
+
+                // Собираем всех уникальных пилотов по имени
+                const driverNames = new Map<string, Set<number>>();
+                allResults.forEach(r => {
+                    if (!driverNames.has(r.driver)) {
+                        driverNames.set(r.driver, new Set());
+                    }
+                    driverNames.get(r.driver)!.add(r.no);
+                });
+
+                // Ищем дубликаты по номеру
+                const driversByNumber = new Map<number, Set<string>>();
+                allResults.forEach(r => {
+                    if (!driversByNumber.has(r.no)) {
+                        driversByNumber.set(r.no, new Set());
+                    }
+                    driversByNumber.get(r.no)!.add(r.driver);
+                });
+
+                let output = '🔍 **ПРОВЕРКА ДУБЛИКАТОВ ПИЛОТОВ**\n\n';
+
+                // Находим пилотов с разными именами под одним номером
+                const duplicates: string[] = [];
+                driversByNumber.forEach((names, number) => {
+                    if (names.size > 1) {
+                        const nameList = Array.from(names).join(' / ');
+
+                        // Считаем очки для каждого имени
+                        const pointsInfo: string[] = [];
+                        names.forEach(name => {
+                            const results = allResults.filter(r => r.no === number && r.driver === name);
+                            const points = results.reduce((sum, r) => sum + r.points, 0);
+                            const races = results.length;
+                            pointsInfo.push(`  • "${name}": ${points} очков (${races} результатов)`);
+                        });
+
+                        duplicates.push(`**#${number}:** ${nameList}\n${pointsInfo.join('\n')}`);
+                    }
+                });
+
+                if (duplicates.length > 0) {
+                    output += '⚠️ **НАЙДЕНЫ ДУБЛИКАТЫ:**\n\n';
+                    output += duplicates.join('\n\n');
+                } else {
+                    output += '✅ Дубликатов не найдено';
+                }
+
+                await this.bot.sendMessage(chatId, output, { parse_mode: 'Markdown' });
+            } catch (error) {
+                console.error('Ошибка /check_duplicates:', error);
+                await this.bot.sendMessage(chatId, '❌ Ошибка при проверке дубликатов.');
+            }
+        });
+
+        this.bot.onText(/\/check_driver (.+)/, async (msg, match) => {
+            const chatId = msg.chat.id;
+
+            if (!this.isDataReady) {
+                return this.bot.sendMessage(chatId, '⏳ Данные ещё загружаются...');
+            }
+
+            const driverName = match?.[1];
+            if (!driverName) {
+                return this.bot.sendMessage(chatId, 'Использование: /check_driver [имя]');
+            }
+
+            try {
+                const results = f1Data.getDriverResults(driverName);
+
+                if (results.length === 0) {
+                    return this.bot.sendMessage(chatId, `❌ Пилот "${driverName}" не найден.`);
+                }
+
+                const driver = results[0].driver;
+                const driverNo = results[0].no;
+
+                let output = `🔍 **ДЕТАЛЬНАЯ ПРОВЕРКА: ${driver} (#${driverNo})**\n\n`;
+
+                const teamPoints = new Map<string, number>();
+                results.forEach(r => {
+                    const current = teamPoints.get(r.team) || 0;
+                    teamPoints.set(r.team, current + r.points);
+                });
+
+                output += `📊 **ОЧКИ ПО КОМАНДАМ:**\n`;
+                teamPoints.forEach((points, team) => {
+                    output += `   ${team}: ${points} очков\n`;
+                });
+
+                output += `\n📋 **ВСЕ РЕЗУЛЬТАТЫ (в хронологическом порядке):**\n\n`;
+
+                results.forEach((r, index) => {
+                    const type = r.isSprint ? '🏃 Sprint' : '🏁 Race';
+                    const prelim = r.isPreliminary ? ' ⚠️' : '';
+                    const dateStr = new Date(r.date).toISOString().split('T')[0];
+
+                    output += `${index + 1}. **${dateStr}** ${type} - ${r.track}\n`;
+                    output += `   P${r.position} | ${r.team} | +${r.points} очков${prelim}\n\n`;
+                });
+
+                output += `\n_Всего результатов: ${results.length}_`;
+
+                if (output.length > 4000) {
+                    const parts = this.splitMessage(output, 4000);
+                    for (const part of parts) {
+                        await this.bot.sendMessage(chatId, part, { parse_mode: 'Markdown' });
+                    }
+                } else {
+                    await this.bot.sendMessage(chatId, output, { parse_mode: 'Markdown' });
+                }
+            } catch (error) {
+                console.error('Ошибка /check_driver:', error);
+                await this.bot.sendMessage(chatId, '❌ Ошибка при проверке пилота.');
+            }
         });
     }
 

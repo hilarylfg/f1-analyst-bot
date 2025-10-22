@@ -1,14 +1,22 @@
 {
   "version": 2,
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
-  "functions": {
-    "api/webhook.ts": {
-      "memory": 1024,
-      "maxDuration": 10
+  "builds": [
+    {
+      "src": "src/index.ts",
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": [
+          "node_modules/@prisma/client/libquery_engine-rhel-openssl-1.0.x.so.node",
+          "node_modules/prisma/libquery_engine-rhel-openssl-1.0.x.so.node",
+          "prisma/schema.prisma"
+        ]
+      }
     }
-  },
-  "env": {
-    "NODE_ENV": "production"
-  }
+  ],
+  "routes": [
+    {
+      "src": "/api/index",
+      "dest": "/src/index.ts"
+    }
+  ]
 }

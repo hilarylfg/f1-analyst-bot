@@ -1,4 +1,4 @@
-import TelegramBot, {type Message} from 'node-telegram-bot-api';
+import TelegramBot, {ConstructorOptions, type Message} from 'node-telegram-bot-api';
 import {analyzeDriverComparison} from './modules/analysis/comparison.js';
 import {askAI} from './modules/ai/open-router.js';
 import {findOrCreateUser, grantConsent} from './core/user-service.js';
@@ -10,16 +10,47 @@ import {f1Data} from "./modules/openf1/openf1-parser.js";
 
 const prisma = new PrismaClient();
 
+let dataInitializationPromise: Promise<void> | null = null;
+
 export class F1Bot {
     private bot: TelegramBot;
     private openRouterKey?: string;
     private aiPredictor?: AIRacePredictor;
     private isDataReady: boolean = false;
 
-    constructor(token: string, openRouterKey?: string) {
-        this.bot = new TelegramBot(token, {polling: true});
+    // --- ИЗМЕНЕНО ---
+    constructor(token: string, openRouterKey?: string, options?: ConstructorOptions) {
+        // Передаем опции (например, polling: false) в конструктор
+        this.bot = new TelegramBot(token, options);
         this.openRouterKey = openRouterKey;
         this.aiPredictor = openRouterKey ? new AIRacePredictor(openRouterKey) : undefined;
+
+        // Запускаем настройку команд сразу при создании объекта
+        this.setupCommands();
+        // Запускаем асинхронную инициализацию данных
+        this.initializeData();
+    }
+
+    public getInstance(): TelegramBot {
+        return this.bot;
+    }
+
+    private initializeData(): void {
+        if (!dataInitializationPromise) {
+            console.log('🚀 Запуск асинхронной инициализации данных...');
+            dataInitializationPromise = f1Data.initialize().then(() => {
+                this.isDataReady = f1Data.isReady();
+                if (this.isDataReady) {
+                    console.log('✅ Данные успешно загружены!');
+                    console.log(`📊 Результатов: ${f1Data.getRaceResults().length}`);
+                    console.log(`📋 Трасс: ${f1Data.getAllTracks().length}`);
+                } else {
+                    console.error('❌ Не удалось загрузить данные!');
+                }
+            }).catch(err => {
+                console.error('❌ Критическая ошибка при инициализации данных:', err);
+            });
+        }
     }
 
     private async onAnyMessage(msg: Message) {
@@ -617,25 +648,5 @@ export class F1Bot {
                 await this.bot.sendMessage(chatId, '❌ Ошибка при проверке пилота.');
             }
         });
-    }
-
-    async start() {
-        console.log('🚀 Запуск F1 Analyst Bot...');
-        console.log('⏳ Загрузка данных из OpenF1 API...');
-
-        await f1Data.initialize();
-
-        this.isDataReady = f1Data.isReady();
-
-        if (!this.isDataReady) {
-            console.error('❌ Не удалось загрузить данные! Бот запущен, но команды могут не работать.');
-        } else {
-            console.log('✅ Данные успешно загружены!');
-            console.log(`📊 Результатов: ${f1Data.getRaceResults().length}`);
-            console.log(`📋 Трасс: ${f1Data.getAllTracks().length}`);
-        }
-
-        this.setupCommands();
-        console.log("✅ F1 Analyst Bot запущен с OpenF1 API! Данные обновляются автоматически.");
     }
 }

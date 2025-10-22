@@ -1,6 +1,5 @@
 import { F1Bot } from './bot.js';
 import * as dotenv from 'dotenv';
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 dotenv.config();
 
@@ -10,15 +9,17 @@ const openRouterKey = process.env.OPENROUTER_API_KEY;
 if (!telegramToken) {
     throw new Error('FATAL: TELEGRAM_BOT_TOKEN не найден в .env файле!');
 }
+if (!process.env.DATABASE_URL) {
+    throw new Error('FATAL: DATABASE_URL не найден в .env файле!');
+}
+if (!openRouterKey) {
+    console.warn('WARN: OPENROUTER_API_KEY не найден. Функциональность /ask будет недоступна.');
+}
 
-const bot = new F1Bot(telegramToken, openRouterKey, { polling: false });
-
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-    try {
-        await bot.getInstance().processUpdate(req.body);
-    } catch (error) {
-        console.error('Ошибка обработки обновления:', error);
-    }
-
-    res.status(200).send('OK');
+try {
+    const bot = new F1Bot(telegramToken, openRouterKey);
+    void bot.start();
+    console.log('✅ F1 Analyst Bot успешно запущен...');
+} catch (error) {
+    console.error('❌ Не удалось запустить бота:', error);
 }

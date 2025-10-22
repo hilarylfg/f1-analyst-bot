@@ -1,4 +1,4 @@
-import TelegramBot, {ConstructorOptions, type Message} from 'node-telegram-bot-api';
+import TelegramBot, {type Message} from 'node-telegram-bot-api';
 import {analyzeDriverComparison} from './modules/analysis/comparison.js';
 import {askAI} from './modules/ai/open-router.js';
 import {findOrCreateUser, grantConsent} from './core/user-service.js';
@@ -10,47 +10,16 @@ import {f1Data} from "./modules/openf1/openf1-parser.js";
 
 const prisma = new PrismaClient();
 
-let dataInitializationPromise: Promise<void> | null = null;
-
 export class F1Bot {
     private bot: TelegramBot;
     private openRouterKey?: string;
     private aiPredictor?: AIRacePredictor;
     private isDataReady: boolean = false;
 
-    // --- ИЗМЕНЕНО ---
-    constructor(token: string, openRouterKey?: string, options?: ConstructorOptions) {
-        // Передаем опции (например, polling: false) в конструктор
-        this.bot = new TelegramBot(token, options);
+    constructor(token: string, openRouterKey?: string) {
+        this.bot = new TelegramBot(token, {polling: true});
         this.openRouterKey = openRouterKey;
         this.aiPredictor = openRouterKey ? new AIRacePredictor(openRouterKey) : undefined;
-
-        // Запускаем настройку команд сразу при создании объекта
-        this.setupCommands();
-        // Запускаем асинхронную инициализацию данных
-        this.initializeData();
-    }
-
-    public getInstance(): TelegramBot {
-        return this.bot;
-    }
-
-    private initializeData(): void {
-        if (!dataInitializationPromise) {
-            console.log('🚀 Запуск асинхронной инициализации данных...');
-            dataInitializationPromise = f1Data.initialize().then(() => {
-                this.isDataReady = f1Data.isReady();
-                if (this.isDataReady) {
-                    console.log('✅ Данные успешно загружены!');
-                    console.log(`📊 Результатов: ${f1Data.getRaceResults().length}`);
-                    console.log(`📋 Трасс: ${f1Data.getAllTracks().length}`);
-                } else {
-                    console.error('❌ Не удалось загрузить данные!');
-                }
-            }).catch(err => {
-                console.error('❌ Критическая ошибка при инициализации данных:', err);
-            });
-        }
     }
 
     private async onAnyMessage(msg: Message) {
@@ -235,6 +204,7 @@ export class F1Bot {
             try {
                 const allResults = f1Data.getRaceResults();
 
+                // Подсчитываем очки по командам
                 const teamPoints = new Map<string, {
                     total: number,
                     race: number,
@@ -262,6 +232,7 @@ export class F1Bot {
                     team.drivers.add(r.driver);
                 });
 
+                // Сортируем по очкам
                 const sortedTeams = Array.from(teamPoints.entries())
                     .sort((a, b) => b[1].total - a[1].total);
 
@@ -270,8 +241,11 @@ export class F1Bot {
                 sortedTeams.forEach(([teamName, data], index) => {
                     const drivers = Array.from(data.drivers).join(', ');
                     output += `**${index + 1}. ${teamName}** — ${data.total} очков\n`;
+                    output += `   🏁 Гонки: ${data.race} | 🏃 Спринты: ${data.sprint}\n`;
                     output += `   👥 Пилоты: ${drivers}\n\n`;
                 });
+
+                output += `_Используйте \`/check_team [название]\` для детальной информации_`;
 
                 await this.bot.sendMessage(chatId, output, { parse_mode: 'Markdown' });
             } catch (error) {
@@ -524,69 +498,6 @@ export class F1Bot {
             }
         });
 
-        this.bot.onText(/\/check_duplicates/, async (msg) => {
-            const chatId = msg.chat.id;
-
-            if (!this.isDataReady) {
-                return this.bot.sendMessage(chatId, '⏳ Данные ещё загружаются...');
-            }
-
-            try {
-                const allResults = f1Data.getRaceResults();
-
-                // Собираем всех уникальных пилотов по имени
-                const driverNames = new Map<string, Set<number>>();
-                allResults.forEach(r => {
-                    if (!driverNames.has(r.driver)) {
-                        driverNames.set(r.driver, new Set());
-                    }
-                    driverNames.get(r.driver)!.add(r.no);
-                });
-
-                // Ищем дубликаты по номеру
-                const driversByNumber = new Map<number, Set<string>>();
-                allResults.forEach(r => {
-                    if (!driversByNumber.has(r.no)) {
-                        driversByNumber.set(r.no, new Set());
-                    }
-                    driversByNumber.get(r.no)!.add(r.driver);
-                });
-
-                let output = '🔍 **ПРОВЕРКА ДУБЛИКАТОВ ПИЛОТОВ**\n\n';
-
-                // Находим пилотов с разными именами под одним номером
-                const duplicates: string[] = [];
-                driversByNumber.forEach((names, number) => {
-                    if (names.size > 1) {
-                        const nameList = Array.from(names).join(' / ');
-
-                        // Считаем очки для каждого имени
-                        const pointsInfo: string[] = [];
-                        names.forEach(name => {
-                            const results = allResults.filter(r => r.no === number && r.driver === name);
-                            const points = results.reduce((sum, r) => sum + r.points, 0);
-                            const races = results.length;
-                            pointsInfo.push(`  • "${name}": ${points} очков (${races} результатов)`);
-                        });
-
-                        duplicates.push(`**#${number}:** ${nameList}\n${pointsInfo.join('\n')}`);
-                    }
-                });
-
-                if (duplicates.length > 0) {
-                    output += '⚠️ **НАЙДЕНЫ ДУБЛИКАТЫ:**\n\n';
-                    output += duplicates.join('\n\n');
-                } else {
-                    output += '✅ Дубликатов не найдено';
-                }
-
-                await this.bot.sendMessage(chatId, output, { parse_mode: 'Markdown' });
-            } catch (error) {
-                console.error('Ошибка /check_duplicates:', error);
-                await this.bot.sendMessage(chatId, '❌ Ошибка при проверке дубликатов.');
-            }
-        });
-
         this.bot.onText(/\/check_driver (.+)/, async (msg, match) => {
             const chatId = msg.chat.id;
 
@@ -648,5 +559,25 @@ export class F1Bot {
                 await this.bot.sendMessage(chatId, '❌ Ошибка при проверке пилота.');
             }
         });
+    }
+
+    async start() {
+        console.log('🚀 Запуск F1 Analyst Bot...');
+        console.log('⏳ Загрузка данных из OpenF1 API...');
+
+        await f1Data.initialize();
+
+        this.isDataReady = f1Data.isReady();
+
+        if (!this.isDataReady) {
+            console.error('❌ Не удалось загрузить данные! Бот запущен, но команды могут не работать.');
+        } else {
+            console.log('✅ Данные успешно загружены!');
+            console.log(`📊 Результатов: ${f1Data.getRaceResults().length}`);
+            console.log(`📋 Трасс: ${f1Data.getAllTracks().length}`);
+        }
+
+        this.setupCommands();
+        console.log("✅ F1 Analyst Bot запущен с OpenF1 API! Данные обновляются автоматически.");
     }
 }

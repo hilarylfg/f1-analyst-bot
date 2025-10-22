@@ -1,30 +1,56 @@
-import {PrismaClient, type User} from '@prisma/client';
-import type {User as TelegramUser} from 'node-telegram-bot-api';
+import { PrismaClient, type User } from '@prisma/client'
+import type { User as TelegramUser } from 'node-telegram-bot-api'
 
-const prisma = new PrismaClient();
+import { logger } from '../utils/logger.js'
+
+const prisma = new PrismaClient()
 
 export async function findOrCreateUser(tgUser: TelegramUser): Promise<User> {
-    if (!tgUser.id) {
-        throw new Error("Telegram user ID is missing.");
-    }
+	if (!tgUser.id) {
+		throw new Error('Telegram user ID отсутствует')
+	}
 
-    return prisma.user.upsert({
-        where: {tgId: BigInt(tgUser.id)},
-        update: {username: tgUser.username},
-        create: {
-            tgId: BigInt(tgUser.id),
-            username: tgUser.username,
-            lang: tgUser.language_code || 'ru',
-        },
-    });
+	try {
+		return await prisma.user.upsert({
+			where: { tgId: BigInt(tgUser.id) },
+			update: {
+				username: tgUser.username,
+				updatedAt: new Date()
+			},
+			create: {
+				tgId: BigInt(tgUser.id),
+				username: tgUser.username,
+				lang: tgUser.language_code || 'ru'
+			}
+		})
+	} catch (error) {
+		logger.error(
+			`Ошибка создания/обновления пользователя ${tgUser.id}`,
+			error
+		)
+		throw error
+	}
 }
 
-export async function grantConsent(userId: number, version: string): Promise<void> {
-    await prisma.consent.create({
-        data: {
-            userId: userId,
-            version: version
-        }
-    });
-    console.log(`Consent version ${version} granted for user ID ${userId}`);
+export async function grantConsent(
+	userId: number,
+	version: string
+): Promise<void> {
+	try {
+		await prisma.consent.create({
+			data: {
+				userId,
+				version
+			}
+		})
+		logger.info(
+			`Согласие v${version} предоставлено пользователем ${userId}`
+		)
+	} catch (error) {
+		logger.error(
+			`Ошибка сохранения согласия для пользователя ${userId}`,
+			error
+		)
+		throw error
+	}
 }

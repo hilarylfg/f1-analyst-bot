@@ -1,189 +1,211 @@
-import {f1Data} from "../openf1/openf1-parser.js";
+import type { RaceResult } from '../../types/f1.types.js'
+import { f1Data } from '../openf1/openf1-parser.js'
 
 export class DriverStatsCalculator {
+	getDriverProfile(driverName: string): string {
+		const results = f1Data.getDriverResults(driverName)
 
-    /**
-     * Получить профиль пилота
-     */
-    getDriverProfile(driverName: string): string {
-        const results = f1Data.getDriverResults(driverName);
+		if (results.length === 0) {
+			return `❌ Пилот "${driverName}" не найден`
+		}
 
-        if (results.length === 0) {
-            return `❌ Пилот "${driverName}" не найден в базе данных.`;
-        }
+		const driver = results[0].driver
+		const driverNo = results[0].no
+		const currentTeam =
+			f1Data.getCurrentTeam(driverNo) || results[results.length - 1].team
 
-        const driver = results[0].driver;
-        const driverNo = results[0].no;
-        const currentTeam = f1Data.getCurrentTeam(driverNo) || results[results.length - 1].team;
+		const stats = this.calculateDriverStats(results)
+		const qualifyingResults = f1Data
+			.getQualifyingResults()
+			.filter(q =>
+				q.driver.toLowerCase().includes(driverName.toLowerCase())
+			)
+		const polePositions = qualifyingResults.filter(
+			q => q.position === 1
+		).length
+		const championshipPosition = this.getChampionshipPosition(driver)
 
-        const totalPoints = results.reduce((sum, r) => sum + r.points, 0);
+		let output = `👤 **${driver}**\n`
+		output += `🏎️ Команда: ${currentTeam}\n\n`
+		output += `📊 **Статистика сезона:**\n`
+		output += `• Позиция: ${championshipPosition}\n`
+		output += `• Очки: ${stats.totalPoints}\n`
+		output += `• Победы: ${stats.wins} | Подиумы: ${stats.podiums}\n`
+		output += `• Поул-позиции: ${polePositions}\n`
+		output += `• DNF/DNS/DSQ: ${stats.dnfs}\n`
+		output += `• Средняя позиция: ${stats.avgPosition}\n`
+		output += `• Процент финишей: ${stats.finishRate}%\n\n`
+		output += `🏁 **Последние 5 уик-эндов:**\n`
+		output += this.formatRecentWeekends(results)
 
-        const wins = results.filter(r =>
-            r.position === '1' && !r.isSprint && r.isClassified
-        ).length;
+		return output
+	}
 
-        const podiums = results.filter(r =>
-            ['1', '2', '3'].includes(r.position) && !r.isSprint && r.isClassified
-        ).length;
+	getDriverForm(driverName: string): string {
+		const results = f1Data.getDriverResults(driverName)
 
-        // ✅ DNF/DNS/DSQ из новых полей
-        const dnfs = results.filter(r => r.isDNF || r.isDNS || r.isDSQ).length;
+		if (results.length === 0) {
+			return `❌ Пилот "${driverName}" не найден`
+		}
 
-        const finishRate = results.length > 0
-            ? ((results.length - dnfs) / results.length * 100).toFixed(1)
-            : '0.0';
+		const driver = results[0].driver
+		const driverNo = results[0].no
+		const currentTeam =
+			f1Data.getCurrentTeam(driverNo) || results[results.length - 1].team
 
-        const classifiedResults = results.filter(r => r.isClassified);
-        const avgPosition = classifiedResults.length > 0
-            ? (classifiedResults.reduce((sum, r) => sum + parseInt(r.position), 0) / classifiedResults.length).toFixed(1)
-            : 'N/A';
+		let output = `📈 **Форма: ${driver}** (${currentTeam})\n\n`
+		output += this.formatDetailedForm(results)
 
-        // ✅ Квалификации (поул-позиции)
-        const qualifyingResults = f1Data.getQualifyingResults().filter(q =>
-            q.driver.toLowerCase().includes(driverName.toLowerCase())
-        );
-        const polePositions = qualifyingResults.filter(q => q.position === 1).length;
+		return output
+	}
 
-        // Позиция в чемпионате
-        const standings = f1Data.getRaceResults();
-        const driverStandings = new Map<string, number>();
-        standings.forEach(r => {
-            const current = driverStandings.get(r.driver) || 0;
-            driverStandings.set(r.driver, current + r.points);
-        });
-        const sortedStandings = Array.from(driverStandings.entries())
-            .sort((a, b) => b[1] - a[1]);
-        const championshipPosition = sortedStandings.findIndex(([name]) => name === driver) + 1;
+	private calculateDriverStats(results: RaceResult[]) {
+		const totalPoints = results.reduce((sum, r) => sum + r.points, 0)
+		const wins = results.filter(
+			r => r.position === '1' && !r.isSprint && r.isClassified
+		).length
+		const podiums = results.filter(
+			r =>
+				['1', '2', '3'].includes(r.position) &&
+				!r.isSprint &&
+				r.isClassified
+		).length
+		const dnfs = results.filter(r => r.isDNF || r.isDNS || r.isDSQ).length
+		const finishRate =
+			results.length > 0
+				? (((results.length - dnfs) / results.length) * 100).toFixed(1)
+				: '0.0'
 
-        let output = `👤 **${driver}**\n`;
-        output += `🏎️ Команда: ${currentTeam}\n\n`;
-        output += `📊 **Статистика сезона:**\n`;
-        output += `• Позиция в чемпионате: ${championshipPosition}\n`;
-        output += `• Очки: ${totalPoints}\n`;
-        output += `• Победы: ${wins} | Подиумы: ${podiums}\n`;
-        output += `• Поул-позиции: ${polePositions}\n`; // ✅ Убрали быстрейшие круги
-        output += `• DNF/DNS/DSQ: ${dnfs}\n`;
-        output += `• Средняя позиция: ${avgPosition}\n`;
-        output += `• Процент финишей: ${finishRate}%\n\n`;
+		const classifiedResults = results.filter(r => r.isClassified)
+		const avgPosition =
+			classifiedResults.length > 0
+				? (
+						classifiedResults.reduce(
+							(sum, r) => sum + parseInt(r.position),
+							0
+						) / classifiedResults.length
+					).toFixed(1)
+				: 'N/A'
 
-        // Последние 5 уик-эндов
-        output += `🏁 **Последние 5 уик-эндов:**\n`;
+		return { totalPoints, wins, podiums, dnfs, finishRate, avgPosition }
+	}
 
-        const trackResults = new Map<string, typeof results>();
-        results.forEach(r => {
-            if (!trackResults.has(r.track)) {
-                trackResults.set(r.track, []);
-            }
-            trackResults.get(r.track)!.push(r);
-        });
+	private getChampionshipPosition(driverName: string): number {
+		const standings = f1Data.getRaceResults()
+		const driverStandings = new Map<string, number>()
 
-        const recentTracks = Array.from(trackResults.entries())
-            .sort((a, b) => new Date(b[1][0].date).getTime() - new Date(a[1][0].date).getTime())
-            .slice(0, 5);
+		standings.forEach(r => {
+			driverStandings.set(
+				r.driver,
+				(driverStandings.get(r.driver) || 0) + r.points
+			)
+		})
 
-        recentTracks.forEach(([track, trackResults]) => {
-            const sorted = trackResults.sort((a, b) =>
-                new Date(a.date).getTime() - new Date(b.date).getTime()
-            );
+		const sorted = Array.from(driverStandings.entries()).sort(
+			(a, b) => b[1] - a[1]
+		)
+		return sorted.findIndex(([name]) => name === driverName) + 1
+	}
 
-            output += `${track}: `;
+	private formatRecentWeekends(results: RaceResult[]): string {
+		const trackResults = this.groupByTrack(results)
+		const recent = Array.from(trackResults.entries())
+			.sort(
+				(a, b) =>
+					new Date(b[1][0].date).getTime() -
+					new Date(a[1][0].date).getTime()
+			)
+			.slice(0, 5)
 
-            sorted.forEach((r, index) => {
-                const type = r.isSprint ? 'Sprint' : 'Race';
-                const prelim = r.isPreliminary ? '⚠️' : '';
+		let output = ''
+		recent.forEach(([track, results]) => {
+			const sorted = results.sort(
+				(a, b) =>
+					new Date(a.date).getTime() - new Date(b.date).getTime()
+			)
+			output += `${track}: `
 
-                // ✅ Показываем DSQ, DNF, DNS из атрибутов
-                let positionStr = '';
-                if (r.isDSQ) positionStr = 'DSQ';
-                else if (r.isDNF) positionStr = 'DNF';
-                else if (r.isDNS) positionStr = 'DNS';
-                else positionStr = `P${r.position}`;
+			sorted.forEach((r, i) => {
+				const type = r.isSprint ? 'Sprint' : 'Race'
+				const position = this.formatPosition(r)
+				const prelim = r.isPreliminary ? '⚠️' : ''
+				output += `${type}: ${position}${prelim}`
+				if (i < sorted.length - 1) output += ', '
+			})
 
-                output += `${type}: ${positionStr}${prelim}`;
-                if (index < sorted.length - 1) output += ', ';
-            });
+			output += '\n'
+		})
 
-            output += '\n';
-        });
+		return output
+	}
 
-        return output;
-    }
+	private formatDetailedForm(results: RaceResult[]): string {
+		const trackResults = this.groupByTrack(results)
+		const recent = Array.from(trackResults.entries())
+			.sort(
+				(a, b) =>
+					new Date(b[1][0].date).getTime() -
+					new Date(a[1][0].date).getTime()
+			)
+			.slice(0, 5)
 
-    /**
-     * Получить форму пилота (последние 5 гонок)
-     */
-    getDriverForm(driverName: string): string {
-        const results = f1Data.getDriverResults(driverName);
+		let output = ''
+		recent.forEach(([track, results]) => {
+			const dateStr = new Date(results[0].date)
+				.toISOString()
+				.split('T')[0]
+			const sorted = results.sort(
+				(a, b) =>
+					new Date(a.date).getTime() - new Date(b.date).getTime()
+			)
 
-        if (results.length === 0) {
-            return `❌ Пилот "${driverName}" не найден в базе данных.`;
-        }
+			output += `**${track}** (${dateStr})\n`
 
-        const driver = results[0].driver;
-        const driverNo = results[0].no;
-        const currentTeam = f1Data.getCurrentTeam(driverNo) || results[results.length - 1].team;
+			sorted.forEach(r => {
+				const type = r.isSprint ? '🏃 Sprint' : '🏁 Race'
+				const position = this.formatPosition(r)
+				const emoji = this.getResultEmoji(r)
+				const prelim = r.isPreliminary ? ' ⚠️' : ''
 
-        // Группируем по трассам
-        const trackResults = new Map<string, typeof results>();
-        results.forEach(r => {
-            if (!trackResults.has(r.track)) {
-                trackResults.set(r.track, []);
-            }
-            trackResults.get(r.track)!.push(r);
-        });
+				output += `   ${emoji} ${type}: ${position} (+${r.points} очков)${prelim}\n`
 
-        // Берём последние 5 трасс
-        const recentTracks = Array.from(trackResults.entries())
-            .sort((a, b) => new Date(b[1][0].date).getTime() - new Date(a[1][0].date).getTime())
-            .slice(0, 5);
+				if (r.gap && r.gap !== '0') {
+					output += `      Отставание: ${r.gap}\n`
+				}
+			})
 
-        let output = `📈 **Форма пилота: ${driver}** (${currentTeam})\n\n`;
+			output += '\n'
+		})
 
-        recentTracks.forEach(([track, trackResults]) => {
-            const dateStr = new Date(trackResults[0].date).toISOString().split('T')[0];
+		return output
+	}
 
-            // Сортируем по дате
-            const sorted = trackResults.sort((a, b) =>
-                new Date(a.date).getTime() - new Date(b.date).getTime()
-            );
+	private groupByTrack(results: RaceResult[]): Map<string, RaceResult[]> {
+		const map = new Map<string, RaceResult[]>()
+		results.forEach(r => {
+			if (!map.has(r.track)) map.set(r.track, [])
+			map.get(r.track)!.push(r)
+		})
+		return map
+	}
 
-            output += `**${track}** (${dateStr})\n`;
+	private formatPosition(result: RaceResult): string {
+		if (result.isDSQ) return 'DSQ'
+		if (result.isDNF) return 'DNF'
+		if (result.isDNS) return 'DNS'
+		if (!result.isClassified) return 'DNF/DNS'
+		if (result.position === 'NC') return 'DSQ'
+		return `P${result.position}`
+	}
 
-            sorted.forEach(r => {
-                const type = r.isSprint ? '🏃 Sprint' : '🏁 Race';
-                const prelim = r.isPreliminary ? ' ⚠️' : '';
-
-                // Позиция
-                let positionStr = '';
-                if (!r.isClassified) {
-                    positionStr = 'DNF/DNS';
-                } else if (r.position === 'NC') {
-                    positionStr = 'DSQ';
-                } else {
-                    positionStr = `P${r.position}`;
-                }
-
-                // Эмодзи по результату
-                let emoji = '';
-                if (r.position === '1' && r.isClassified) emoji = '🥇';
-                else if (r.position === '2' && r.isClassified) emoji = '🥈';
-                else if (r.position === '3' && r.isClassified) emoji = '🥉';
-                else if (!r.isClassified || r.position === 'NC') emoji = '❌';
-                else if (parseInt(r.position) <= 10) emoji = '✅';
-                else emoji = '⚪';
-
-                output += `   ${emoji} ${type}: ${positionStr} (+${r.points} очков)${prelim}\n`;
-
-                if (r.gap && r.gap !== '0') {
-                    output += `      Отставание: ${r.gap}\n`;
-                }
-            });
-
-            output += '\n';
-        });
-
-        return output;
-    }
+	private getResultEmoji(result: RaceResult): string {
+		if (result.position === '1' && result.isClassified) return '🥇'
+		if (result.position === '2' && result.isClassified) return '🥈'
+		if (result.position === '3' && result.isClassified) return '🥉'
+		if (!result.isClassified || result.position === 'NC') return '❌'
+		if (parseInt(result.position) <= 10) return '✅'
+		return '⚪'
+	}
 }
 
-export const driverStats = new DriverStatsCalculator();
+export const driverStats = new DriverStatsCalculator()

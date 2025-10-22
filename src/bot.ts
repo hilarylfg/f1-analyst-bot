@@ -239,11 +239,8 @@ export class F1Bot {
                 sortedTeams.forEach(([teamName, data], index) => {
                     const drivers = Array.from(data.drivers).join(', ');
                     output += `**${index + 1}. ${teamName}** — ${data.total} очков\n`;
-                    output += `   🏁 Гонки: ${data.race} | 🏃 Спринты: ${data.sprint}\n`;
                     output += `   👥 Пилоты: ${drivers}\n\n`;
                 });
-
-                output += `_Используйте \`/check_team [название]\` для детальной информации_`;
 
                 await this.bot.sendMessage(chatId, output, { parse_mode: 'Markdown' });
             } catch (error) {

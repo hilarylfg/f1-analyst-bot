@@ -65,8 +65,8 @@ export class F1Bot {
             const options = {
                 reply_markup: {
                     inline_keyboard: [
-                        [{text: "✅ Принять политику v1.0", callback_data: "consent_accept_v1.0"}],
-                        [{text: "📄 Читать политику (ссылка)", url: "https://github.com/hilarylfg"}]
+                        [{text: "✅ Принять политику", callback_data: "consent_accept_v1.0"}],
+                        [{text: "📄 Читать политику (ссылка)", url: "https://github.com/hilarylfg/f1-analyst-bot/blob/main/PRIVACY_POLICY.md"}]
                     ]
                 }
             };
@@ -85,8 +85,6 @@ export class F1Bot {
                 await this.bot.sendMessage(query.message.chat.id, "Используйте /help, чтобы увидеть список команд.");
             }
         });
-
-        // === НОВЫЕ КОМАНДЫ ===
 
         // Таблица чемпионата пилотов
         this.bot.onText(/\/standings/, async (msg) => {
